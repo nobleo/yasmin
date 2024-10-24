@@ -11,6 +11,7 @@
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <exec_depend>python3-expiringdict</exec_depend>
+  <exec_depend>python3-flask</exec_depend>
   <exec_depend>python3-waitress</exec_depend>
   
   <depend>rclcpp</depend>
