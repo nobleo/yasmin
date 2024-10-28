@@ -16,8 +16,9 @@
 
 from typing import Dict, List, Union
 from threading import Lock
-from yasmin.state import State
-from yasmin.yasmin_logs import YASMIN_LOG_INFO
+
+import yasmin
+from yasmin import State
 from yasmin.blackboard import Blackboard
 
 
@@ -35,16 +36,28 @@ class StateMachine(State):
         self,
         name: str,
         state: State,
-        transitions: Dict[str, str] = None
+        transitions: Dict[str, str] = None,
     ) -> None:
 
         if not transitions:
             transitions = {}
 
-        self._states[name] = {
-            "state": state,
-            "transitions": transitions
-        }
+        if name in self._states:
+            raise Exception(f"State '{name}' already registered in the state machine")
+
+        for key in transitions:
+            if not key:
+                raise Exception(f"Transitions with empty source in state '{name}'")
+
+            if not transitions[key]:
+                raise Exception(f"Transitions with empty target in state '{name}'")
+
+            if key not in state.get_outcomes():
+                raise Exception(
+                    f"State '{name}' references unregistered outcomes: '{key}', available outcomes are: {state.get_outcomes()}"
+                )
+
+        self._states[name] = {"state": state, "transitions": transitions}
 
         if not self._start_state:
             self._start_state = name
@@ -61,7 +74,67 @@ class StateMachine(State):
             if self.__current_state:
                 self._states[self.__current_state]["state"].cancel_state()
 
+    def validate(self, raise_exception: bool = True) -> str:
+        errors = ""
+
+        # check initial state
+        if self._start_state is None:
+            errors += "\n\tNo initial state set."
+        elif self._start_state not in self._states:
+            errors += f"\n\tInitial state label: '{self._start_state}' is not in the state machine."
+
+        terminal_outcomes = []
+
+        # check all states
+        for state_name in self._states:
+
+            state: State = self._states[state_name]["state"]
+            transitions: Dict[str, str] = self._states[state_name]["transitions"]
+
+            outcomes = state.get_outcomes()
+
+            # check if all state outcomes are in transitions
+            for o in outcomes:
+                if o not in set(list(transitions.keys()) + self.get_outcomes()):
+                    errors += f"\n\tState '{state_name}' outcome '{o}' not registered in transitions"
+
+                # state outcomes that are in state machines out do not need transitions
+                elif o in self.get_outcomes():
+                    terminal_outcomes.append(o)
+
+            # if sate is a state machine, validate it
+            if isinstance(state, StateMachine):
+                aux_errors = state.validate(False)
+                if aux_errors:
+                    errors += f"\n\tState machine '{state_name}' failed validation check\n{aux_errors}"
+
+            # add terminal outcomes
+            terminal_outcomes.extend([transitions[key] for key in transitions])
+
+        # check terminal outcomes for the state machine
+        terminal_outcomes = set(terminal_outcomes)
+
+        # check if all state machine outcomes are in the terminal outcomes
+        for o in self.get_outcomes():
+            if o not in terminal_outcomes:
+                errors += f"\n\tTarget outcome '{o}' not registered in transitions"
+
+        # check if all terminal outcomes are states or state machine outcomes
+        for o in terminal_outcomes:
+            if o not in set(list(self._states.keys()) + self.get_outcomes()):
+                errors += f"\n\tState machine outcome '{o}' not registered as outcome neither state"
+
+        if errors:
+            errors = f"{'*' * 100}\nState machine failed validation check:{errors}\n\n\tAvailable states: {list(self._states.keys())}\n{'*' * 100}"
+
+            if raise_exception:
+                raise Exception(errors)
+
+        return errors
+
     def execute(self, blackboard: Blackboard) -> str:
+
+        self.validate()
 
         with self.__current_state_lock:
             self.__current_state = self._start_state
@@ -76,13 +149,13 @@ class StateMachine(State):
             # check outcome belongs to state
             if outcome not in state["state"].get_outcomes():
                 raise Exception(
-                    f"Outcome ({outcome}) is not register in state {self.__current_state}")
+                    f"Outcome ({outcome}) is not register in state {self.__current_state}"
+                )
 
             # translate outcome using transitions
             if outcome in state["transitions"]:
-                YASMIN_LOG_INFO(
-                    "%s: %s --> %s",
-                    self.__current_state, outcome, state["transitions"][outcome]
+                yasmin.YASMIN_LOG_INFO(
+                    f"{self.__current_state}: {outcome} --> {state['transitions'][outcome]}"
                 )
                 outcome = state["transitions"][outcome]
 

@@ -47,14 +47,13 @@ $ colcon build
 
 ## Docker
 
-If your operating system doesn't support ROS 2 humble, docker is a great alternative.
-
-First of all, you have to build the project and create an  image like so:
+If your operating system doesn't support ROS 2 humble, docker is a great alternative. First of all, you have to build the project and create an image like so:
 
 ```shell
 ## Assuming you are in the correct project directory
-$ docker build . -t yasmin
+$ docker build -t yasmin .
 ```
+
 To use a shortcut, you may use the following command:
 
 ```shell
@@ -62,18 +61,20 @@ To use a shortcut, you may use the following command:
 $ make docker_build
 ```
 
-After the image is created, copy and paste the following command to the terminal to run the image:
+After the image is created, run a docker container with the following command:
 
 ```shell
 ## Assuming you are in the correct project directory
 $ docker run -it --net=host --ipc=host --privileged --env="DISPLAY" --env="QT_X11_NO_MITSHM=1" --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" --volume="${XAUTHORITY}:/root/.Xauthority" --entrypoint /bin/bash yasmin
 ```
+
 To use a shortcut, you may use following command:
 
 ```shell
 $ make docker_run
 ```
-### Running the package at docker image
+
+### Running the docker image
 
 If you are in the docker image , this project is already sourced and the demo script can be run as the following command;
 
@@ -742,7 +743,7 @@ int main(int argc, char *argv[]) {
   sm->add_state("BAR", std::make_shared<BarState>(), {{"outcome3", "FOO"}});
 
   // pub
-  yasmin_viewer::YasminViewerPub yasmin_pub("YASMIN_ACTION_CLIENT_DEMO", sm);
+  yasmin_viewer::YasminViewerPub yasmin_pub("yasmin_demo", sm);
 
   // execute
   std::string outcome = (*sm.get())();
@@ -1118,7 +1119,7 @@ int main(int argc, char *argv[]) {
                  {yasmin_ros::basic_outcomes::TIMEOUT, "outcome4"}});
 
   // pub
-  yasmin_viewer::YasminViewerPub yasmin_pub("YASMIN_ACTION_CLIENT_DEMO", sm);
+  yasmin_viewer::YasminViewerPub yasmin_pub("YASMIN_MONITOR_DEMO", sm);
 
   // execute
   std::string outcome = (*sm.get())();
