@@ -17,6 +17,9 @@ endif()
 if("$ENV{ROS_DISTRO}" STREQUAL "foxy")
   message(STATUS "Build for ROS2 Foxy")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DFOXY")
+elseif("$ENV{ROS_DISTRO}" STREQUAL "galactic")
+  message(STATUS "Build for ROS2 Galactic")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DGALACTIC")
 elseif("$ENV{ROS_DISTRO}" STREQUAL "humble")
   message(STATUS "Build for ROS2 Humble")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHUMBLE")
@@ -48,6 +51,7 @@ include_directories(src)
 set(LIB ${CMAKE_PROJECT_NAME}_lib)
 set(SOURCES
   src/yasmin_ros/yasmin_node.cpp
+  src/yasmin_ros/ros_logs.cpp
   src/yasmin_ros/action_state.cpp
   src/yasmin_ros/service_state.cpp
   src/yasmin_ros/monitor_state.cpp

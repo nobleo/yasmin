@@ -1,24 +1,24 @@
 # Copyright (C) 2023  Miguel Ángel González Santamarta
-
+#
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-
+#
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
-from typing import List, Callable, Type, Any
+from typing import Set, Callable, Type, Any
 
 from rclpy.node import Node
 from rclpy.client import Client
 
+import yasmin
 from yasmin import State
 from yasmin import Blackboard
 from yasmin_ros.yasmin_node import YasminNode
@@ -26,52 +26,98 @@ from yasmin_ros.basic_outcomes import SUCCEED, ABORT, TIMEOUT
 
 
 class ServiceState(State):
+    """
+    A state representing a service call in a behavior tree.
 
-    _node: Node
-    _srv_name: str
-    _service_client: Client
-    _create_request_handler: Callable
-    _response_handler: Callable
-    _timeout: float
+    This state manages the communication with a ROS service, creating and sending
+    requests, and handling responses. It can handle timeouts and custom outcomes.
+
+    Attributes:
+        _node (Node): The ROS node used to communicate with the service.
+        _srv_name (str): The name of the service to call.
+        _service_client (Client): The client used to call the service.
+        _create_request_handler (Callable[[Blackboard], Any]): A function that creates the service request.
+        _response_handler (Callable[[Blackboard, Any], str]): A function that processes the service response.
+        _timeout (float): Timeout duration for the service call.
+    """
 
     def __init__(
         self,
         srv_type: Type,
         srv_name: str,
         create_request_handler: Callable,
-        outcomes: List[str] = None,
+        outcomes: Set[str] = None,
         response_handler: Callable = None,
         node: Node = None,
         timeout: float = None,
     ) -> None:
+        """
+        Initializes the ServiceState with the provided parameters.
 
-        self._srv_name = srv_name
+        Parameters:
+            srv_type (Type): The type of the service.
+            srv_name (str): The name of the service to be called.
+            create_request_handler (Callable[[Blackboard], Any]): A handler to create the request based on the blackboard data.
+            outcomes (Set[str], optional): A set of additional outcomes for this state.
+            response_handler (Callable[[Blackboard, Any], str], optional): A handler to process the service response.
+            node (Node, optional): A ROS node instance; if None, a default instance is used.
+            timeout (float, optional): Timeout duration for waiting on the service.
+
+        Raises:
+            ValueError: If the create_request_handler is not provided.
+        """
+
+        ## A function that creates the service request.
+        self._create_request_handler: Callable[[Blackboard], Any] = create_request_handler
+        ## A function that processes the service response.
+        self._response_handler: Callable[[Blackboard, Any], str] = response_handler
+
+        ## Timeout duration for the service call.
+        self._timeout: float = timeout
+
         _outcomes = [SUCCEED, ABORT]
 
-        self._timeout = timeout
         if self._timeout:
             _outcomes.append(TIMEOUT)
 
         if outcomes:
             _outcomes = _outcomes + outcomes
 
-        if node is None:
-            self._node = YasminNode.get_instance()
-        else:
-            self._node = node
+        ## The ROS node used to communicate with the service.
+        self._node = node
 
-        self._service_client = self._node.create_client(srv_type, srv_name)
+        if self._node is None:
+            self._node: Node = YasminNode.get_instance()
 
-        self._create_request_handler = create_request_handler
-        self._response_handler = response_handler
+        ## The name of the service to call.
+        self._srv_name: str = srv_name
+
+        ## The client used to call the service.
+        self._service_client: Client = self._node.create_client(srv_type, srv_name)
 
         if not self._create_request_handler:
-            raise Exception("create_request_handler is needed")
+            raise ValueError("create_request_handler is needed")
 
         super().__init__(_outcomes)
 
     def execute(self, blackboard: Blackboard) -> str:
+        """
+        Executes the service call.
 
+        This method prepares the request using the provided blackboard,
+        waits for the service to become available, and sends the request.
+        It also handles the response and can process outcomes based on the
+        response handler.
+
+        Parameters:
+            blackboard (Blackboard): The blackboard object that holds the data for request creation.
+
+        Returns:
+            str: The outcome of the state execution, which can be SUCCEED, ABORT, or TIMEOUT.
+
+        Exceptions:
+            Exception: Catches all exceptions during the service call and returns ABORT.
+        """
         request = self._create_request_handler(blackboard)
 
         self._node.get_logger().info(f"Waiting for service '{self._srv_name}'")
@@ -84,11 +130,11 @@ class ServiceState(State):
             return TIMEOUT
 
         try:
-            self._node.get_logger().info(
-                f"Sending request to service '{self._srv_name}'"
-            )
+            self._node.get_logger().info(f"Sending request to service '{self._srv_name}'")
             response = self._service_client.call(request)
-        except:
+
+        except Exception as e:
+            yasmin.YASMIN_LOG_WARN(f"Service call failed: {e}")
             return ABORT
 
         if self._response_handler:
