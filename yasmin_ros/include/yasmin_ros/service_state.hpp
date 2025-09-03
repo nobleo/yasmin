@@ -1,4 +1,4 @@
-// Copyright (C) 2023  Miguel Ángel González Santamarta
+// Copyright (C) 2023 Miguel Ángel González Santamarta
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,8 +13,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef YASMIN_ROS_SERVICE_STATE_HPP
-#define YASMIN_ROS_SERVICE_STATE_HPP
+#ifndef YASMIN_ROS__SERVICE_STATE_HPP
+#define YASMIN_ROS__SERVICE_STATE_HPP
 
 #include <functional>
 #include <memory>
@@ -24,6 +24,7 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include "yasmin/blackboard/blackboard.hpp"
+#include "yasmin/logs.hpp"
 #include "yasmin/state.hpp"
 #include "yasmin_ros/basic_outcomes.hpp"
 #include "yasmin_ros/yasmin_node.hpp"
@@ -66,7 +67,25 @@ public:
                CreateRequestHandler create_request_handler,
                std::set<std::string> outcomes, int timeout = -1.0)
       : ServiceState(srv_name, create_request_handler, outcomes, nullptr,
-                     timeout) {}
+                     nullptr, timeout) {}
+
+  /**
+   * @brief Construct a ServiceState with a request handler and outcomes.
+   *
+   * @param srv_name The name of the service to call.
+   * @param create_request_handler Function to create a service request.
+   * @param outcomes A set of possible outcomes for this state.
+   * @param callback_group (Optional) The callback group for the subscription.
+   * @param timeout Maximum time to wait for the service to become available, in
+   * seconds. Default is -1 (wait indefinitely).
+   */
+  ServiceState(std::string srv_name,
+               CreateRequestHandler create_request_handler,
+               std::set<std::string> outcomes,
+               rclcpp::CallbackGroup::SharedPtr callback_group = nullptr,
+               int timeout = -1.0)
+      : ServiceState(srv_name, create_request_handler, outcomes, nullptr,
+                     callback_group, timeout) {}
 
   /**
    * @brief Construct a ServiceState with a request handler and response
@@ -75,7 +94,7 @@ public:
    * @param srv_name The name of the service to call.
    * @param create_request_handler Function to create a service request.
    * @param outcomes A set of possible outcomes for this state.
-   * @param response_handler Function to handle the service response.
+   * @param response_handler (Optional) Function to handle the service response.
    * @param timeout Maximum time to wait for the service to become available, in
    * seconds. Default is -1 (wait indefinitely).
    */
@@ -84,7 +103,7 @@ public:
                std::set<std::string> outcomes, ResponseHandler response_handler,
                int timeout = -1.0)
       : ServiceState(nullptr, srv_name, create_request_handler, outcomes,
-                     response_handler, timeout) {}
+                     response_handler, nullptr, timeout) {}
 
   /**
    * @brief Construct a ServiceState with a ROS 2 node and handlers.
@@ -93,7 +112,8 @@ public:
    * @param srv_name The name of the service to call.
    * @param create_request_handler Function to create a service request.
    * @param outcomes A set of possible outcomes for this state.
-   * @param response_handler Function to handle the service response.
+   * @param response_handler (Optional) Function to handle the service response.
+   * @param callback_group (Optional) The callback group for the subscription.
    * @param timeout Maximum time to wait for the service to become available, in
    * seconds. Default is -1 (wait indefinitely).
    *
@@ -102,6 +122,7 @@ public:
   ServiceState(const rclcpp::Node::SharedPtr &node, std::string srv_name,
                CreateRequestHandler create_request_handler,
                std::set<std::string> outcomes, ResponseHandler response_handler,
+               rclcpp::CallbackGroup::SharedPtr callback_group = nullptr,
                int timeout = -1.0)
       : State({}), srv_name(srv_name), timeout(timeout) {
 
@@ -122,9 +143,21 @@ public:
       this->node_ = node;
     }
 
-    // Create a service client
-    this->service_client =
-        this->node_->template create_client<ServiceT>(srv_name);
+    // Create a service client (compatible with different rclcpp versions)
+#if __has_include("rclcpp/version.h")
+#include "rclcpp/version.h"
+#if RCLCPP_VERSION_GTE(28, 1, 9)
+    auto qos = rclcpp::QoS(
+        rclcpp::QoSInitialization::from_rmw(rmw_qos_profile_services_default));
+#else
+    auto qos = rmw_qos_profile_services_default;
+#endif
+#else
+    auto qos = rmw_qos_profile_services_default;
+#endif
+
+    this->service_client = this->node_->template create_client<ServiceT>(
+        srv_name, qos, callback_group);
 
     // Set the request and response handlers
     this->create_request_handler = create_request_handler;
@@ -153,21 +186,18 @@ public:
     Request request = this->create_request(blackboard);
 
     // Wait for the service to become available
-    RCLCPP_INFO(this->node_->get_logger(), "Waiting for service '%s'",
-                this->srv_name.c_str());
+    YASMIN_LOG_INFO("Waiting for service '%s'", this->srv_name.c_str());
     bool srv_available = this->service_client->wait_for_service(
         std::chrono::duration<int64_t, std::ratio<1>>(this->timeout));
 
     if (!srv_available) {
-      RCLCPP_WARN(this->node_->get_logger(),
-                  "Timeout reached, service '%s' is not available",
-                  this->srv_name.c_str());
+      YASMIN_LOG_WARN("Timeout reached, service '%s' is not available",
+                      this->srv_name.c_str());
       return basic_outcomes::TIMEOUT;
     }
 
     // Send the service request
-    RCLCPP_INFO(this->node_->get_logger(), "Sending request to service '%s'",
-                this->srv_name.c_str());
+    YASMIN_LOG_INFO("Sending request to service '%s'", this->srv_name.c_str());
     auto future = this->service_client->async_send_request(request);
 
     // Wait for the response
@@ -214,4 +244,4 @@ private:
 
 } // namespace yasmin_ros
 
-#endif // YASMIN_ROS_SERVICE_STATE_HPP
+#endif // YASMIN_ROS__SERVICE_STATE_HPP

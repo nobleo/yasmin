@@ -1,4 +1,4 @@
-// Copyright (C) 2023  Miguel Ángel González Santamarta
+// Copyright (C) 2023 Miguel Ángel González Santamarta
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,8 +13,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef YASMIN_ROS_BASIC_OUTCOME_HPP
-#define YASMIN_ROS_BASIC_OUTCOME_HPP
+#ifndef YASMIN_ROS__BASIC_OUTCOME_HPP
+#define YASMIN_ROS__BASIC_OUTCOME_HPP
 
 #include <string>
 
@@ -47,6 +47,14 @@ constexpr char SUCCEED[] = "succeeded";
 constexpr char ABORT[] = "aborted";
 
 /**
+ * @brief Constant representing a failed action outcome.
+ *
+ * This string constant is used to indicate that an action has completed
+ * but resulted in failure, meaning it did not achieve its intended result.
+ */
+constexpr char FAIL[] = "failed";
+
+/**
  * @brief Constant representing a canceled action outcome.
  *
  * This string constant is used when an action is manually canceled by a user
@@ -65,4 +73,4 @@ constexpr char TIMEOUT[] = "timeout";
 } // namespace basic_outcomes
 } // namespace yasmin_ros
 
-#endif // YASMIN_ROS_BASIC_OUTCOME_HPP
+#endif // YASMIN_ROS__BASIC_OUTCOME_HPP

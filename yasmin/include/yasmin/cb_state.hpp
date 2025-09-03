@@ -1,4 +1,4 @@
-// Copyright (C) 2023  Miguel Ángel González Santamarta
+// Copyright (C) 2023 Miguel Ángel González Santamarta
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,9 +13,10 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef YASMIN_CB_STATE_HPP
-#define YASMIN_CB_STATE_HPP
+#ifndef YASMIN__CB_STATE_HPP
+#define YASMIN__CB_STATE_HPP
 
+#include <functional>
 #include <memory>
 #include <set>
 #include <string>
@@ -37,7 +38,7 @@ class CbState : public State {
 
 private:
   /// Pointer to the callback function to be executed.
-  std::string (*callback)(std::shared_ptr<blackboard::Blackboard> blackboard);
+  std::function<std::string(std::shared_ptr<blackboard::Blackboard>)> callback;
 
 public:
   /**
@@ -50,8 +51,8 @@ public:
    * @throw std::invalid_argument If the outcomes set is empty.
    */
   CbState(std::set<std::string> outcomes,
-          std::string (*callback)(
-              std::shared_ptr<blackboard::Blackboard> blackboard));
+          std::function<std::string(std::shared_ptr<blackboard::Blackboard>)>
+              callback);
 
   /**
    * @brief Executes the callback function.
@@ -72,4 +73,4 @@ public:
 
 } // namespace yasmin
 
-#endif // YASMIN_CB_STATE_HPP
+#endif // YASMIN__CB_STATE_HPP

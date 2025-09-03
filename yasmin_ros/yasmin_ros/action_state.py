@@ -1,4 +1,4 @@
-# Copyright (C) 2023  Miguel Ángel González Santamarta
+# Copyright (C) 2023 Miguel Ángel González Santamarta
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,9 +20,10 @@ from rclpy.node import Node
 from rclpy.task import Future
 from rclpy.action import ActionClient
 from rclpy.action.client import ClientGoalHandle
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import CallbackGroup
 from action_msgs.msg import GoalStatus
 
+import yasmin
 from yasmin import State
 from yasmin import Blackboard
 from yasmin_ros.yasmin_node import YasminNode
@@ -59,6 +60,7 @@ class ActionState(State):
         outcomes: Set[str] = None,
         result_handler: Callable = None,
         feedback_handler: Callable = None,
+        callback_group: CallbackGroup = None,
         node: Node = None,
         timeout: float = None,
     ) -> None:
@@ -74,6 +76,7 @@ class ActionState(State):
             outcomes (Set[str], optional): Additional outcomes that this state can return.
             result_handler (Callable[[Blackboard, Any], str], optional): A function to process the result of the action.
             feedback_handler (Callable[[Blackboard, Any], None], optional): A function to process feedback from the action.
+            callback_group (CallbackGroup, optional): The callback group for the action client.
             node (Node, optional): The ROS 2 node to use. If None, uses the default YasminNode.
             timeout (float, optional): Timeout duration for waiting for the action server.
 
@@ -124,7 +127,7 @@ class ActionState(State):
             self._node,
             action_type,
             action_name,
-            callback_group=ReentrantCallbackGroup(),
+            callback_group=callback_group,
         )
 
         if not self._create_goal_handler:
@@ -162,18 +165,18 @@ class ActionState(State):
         """
         goal = self._create_goal_handler(blackboard)
 
-        self._node.get_logger().info(f"Waiting for action '{self._action_name}'")
+        yasmin.YASMIN_LOG_INFO(f"Waiting for action '{self._action_name}'")
         act_available = self._action_client.wait_for_server(self._timeout)
 
         if not act_available:
-            self._node.get_logger().warn(
+            yasmin.YASMIN_LOG_WARN(
                 f"Timeout reached, action '{self._action_name}' is not available"
             )
             return TIMEOUT
 
         self._action_done_event.clear()
 
-        self._node.get_logger().info(f"Sending goal to action '{self._action_name}'")
+        yasmin.YASMIN_LOG_INFO(f"Sending goal to action '{self._action_name}'")
 
         def feedback_handler(feedback):
             if self._feedback_handler is not None:

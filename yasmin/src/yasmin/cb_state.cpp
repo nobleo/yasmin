@@ -1,4 +1,4 @@
-// Copyright (C) 2023  Miguel Ángel González Santamarta
+// Copyright (C) 2023 Miguel Ángel González Santamarta
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -19,7 +19,8 @@ namespace yasmin {
 
 CbState::CbState(
     std::set<std::string> outcomes,
-    std::string (*callback)(std::shared_ptr<blackboard::Blackboard> blackboard))
+    std::function<std::string(std::shared_ptr<blackboard::Blackboard>)>
+        callback)
     : State(outcomes), callback(callback) {
   if (outcomes.empty()) {
     throw std::invalid_argument("Outcomes set cannot be empty.");

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (C) 2023  Miguel Ángel González Santamarta
+# Copyright (C) 2023 Miguel Ángel González Santamarta
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@ from yasmin import CbState
 from yasmin import Blackboard
 from yasmin import StateMachine
 from yasmin_ros import ServiceState
-from yasmin_ros.ros_logs import set_ros_loggers
+from yasmin_ros import set_ros_loggers
 from yasmin_ros.basic_outcomes import SUCCEED, ABORT
 from yasmin_viewer import YasminViewerPub
 

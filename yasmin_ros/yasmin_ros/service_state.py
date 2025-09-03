@@ -1,4 +1,4 @@
-# Copyright (C) 2023  Miguel Ángel González Santamarta
+# Copyright (C) 2023 Miguel Ángel González Santamarta
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,6 +17,7 @@ from typing import Set, Callable, Type, Any
 
 from rclpy.node import Node
 from rclpy.client import Client
+from rclpy.callback_groups import CallbackGroup
 
 import yasmin
 from yasmin import State
@@ -48,6 +49,7 @@ class ServiceState(State):
         create_request_handler: Callable,
         outcomes: Set[str] = None,
         response_handler: Callable = None,
+        callback_group: CallbackGroup = None,
         node: Node = None,
         timeout: float = None,
     ) -> None:
@@ -60,6 +62,7 @@ class ServiceState(State):
             create_request_handler (Callable[[Blackboard], Any]): A handler to create the request based on the blackboard data.
             outcomes (Set[str], optional): A set of additional outcomes for this state.
             response_handler (Callable[[Blackboard, Any], str], optional): A handler to process the service response.
+            callback_group (CallbackGroup, optional): The callback group for the client.
             node (Node, optional): A ROS node instance; if None, a default instance is used.
             timeout (float, optional): Timeout duration for waiting on the service.
 
@@ -93,7 +96,9 @@ class ServiceState(State):
         self._srv_name: str = srv_name
 
         ## The client used to call the service.
-        self._service_client: Client = self._node.create_client(srv_type, srv_name)
+        self._service_client: Client = self._node.create_client(
+            srv_type, srv_name, callback_group=callback_group
+        )
 
         if not self._create_request_handler:
             raise ValueError("create_request_handler is needed")
@@ -120,17 +125,17 @@ class ServiceState(State):
         """
         request = self._create_request_handler(blackboard)
 
-        self._node.get_logger().info(f"Waiting for service '{self._srv_name}'")
+        yasmin.YASMIN_LOG_INFO(f"Waiting for service '{self._srv_name}'")
         srv_available = self._service_client.wait_for_service(timeout_sec=self._timeout)
 
         if not srv_available:
-            self._node.get_logger().warn(
+            yasmin.YASMIN_LOG_WARN(
                 f"Timeout reached, service '{self._srv_name}' is not available"
             )
             return TIMEOUT
 
         try:
-            self._node.get_logger().info(f"Sending request to service '{self._srv_name}'")
+            yasmin.YASMIN_LOG_INFO(f"Sending request to service '{self._srv_name}'")
             response = self._service_client.call(request)
 
         except Exception as e:

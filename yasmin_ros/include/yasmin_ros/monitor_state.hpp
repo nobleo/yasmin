@@ -1,4 +1,4 @@
-// Copyright (C) 2023  Miguel Ángel González Santamarta
+// Copyright (C) 2023 Miguel Ángel González Santamarta
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,10 +13,11 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef YASMIN_ROS_MONITOR_STATE_HPP
-#define YASMIN_ROS_MONITOR_STATE_HPP
+#ifndef YASMIN_ROS__MONITOR_STATE_HPP
+#define YASMIN_ROS__MONITOR_STATE_HPP
 
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <set>
@@ -26,6 +27,7 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include "yasmin/blackboard/blackboard.hpp"
+#include "yasmin/logs.hpp"
 #include "yasmin/state.hpp"
 #include "yasmin_ros/basic_outcomes.hpp"
 #include "yasmin_ros/yasmin_node.hpp"
@@ -51,32 +53,6 @@ template <typename MsgT> class MonitorState : public yasmin::State {
 
 public:
   /**
-   * @brief Construct a new MonitorState with specific QoS and message queue
-   * settings.
-   *
-   * @param topic_name The name of the topic to monitor.
-   * @param outcomes A set of possible outcomes for this state.
-   * @param monitor_handler A callback handler to process incoming messages.
-   * @param qos Quality of Service settings for the topic.
-   * @param msg_queue The maximum number of messages to queue.
-   */
-  MonitorState(std::string topic_name, std::set<std::string> outcomes,
-               MonitorHandler monitor_handler, rclcpp::QoS qos, int msg_queue)
-      : MonitorState(topic_name, outcomes, monitor_handler, qos, msg_queue,
-                     -1) {}
-
-  /**
-   * @brief Construct a new MonitorState with default QoS and message queue.
-   *
-   * @param topic_name The name of the topic to monitor.
-   * @param outcomes A set of possible outcomes for this state.
-   * @param monitor_handler A callback handler to process incoming messages.
-   */
-  MonitorState(std::string topic_name, std::set<std::string> outcomes,
-               MonitorHandler monitor_handler)
-      : MonitorState(topic_name, outcomes, monitor_handler, 10, 10, -1) {}
-
-  /**
    * @brief Construct a new MonitorState with specific QoS, message queue, and
    * timeout.
    *
@@ -88,10 +64,29 @@ public:
    * @param timeout The time in seconds to wait for messages before timing out.
    */
   MonitorState(std::string topic_name, std::set<std::string> outcomes,
-               MonitorHandler monitor_handler, rclcpp::QoS qos, int msg_queue,
-               int timeout)
+               MonitorHandler monitor_handler, rclcpp::QoS qos = 10,
+               int msg_queue = 10, int timeout = -1)
       : MonitorState(nullptr, topic_name, outcomes, monitor_handler, qos,
-                     msg_queue, timeout) {}
+                     nullptr, msg_queue, timeout) {}
+
+  /**
+   * @brief Construct a new MonitorState with specific QoS, message queue, and
+   * timeout.
+   *
+   * @param topic_name The name of the topic to monitor.
+   * @param outcomes A set of possible outcomes for this state.
+   * @param monitor_handler A callback handler to process incoming messages.
+   * @param qos Quality of Service settings for the topic.
+   * @param callback_group The callback group for the subscription.
+   * @param msg_queue The maximum number of messages to queue.
+   * @param timeout The time in seconds to wait for messages before timing out.
+   */
+  MonitorState(std::string topic_name, std::set<std::string> outcomes,
+               MonitorHandler monitor_handler, rclcpp::QoS qos = 10,
+               rclcpp::CallbackGroup::SharedPtr callback_group = nullptr,
+               int msg_queue = 10, int timeout = -1)
+      : MonitorState(nullptr, topic_name, outcomes, monitor_handler, qos,
+                     callback_group, msg_queue, timeout) {}
 
   /**
    * @brief Construct a new MonitorState with ROS 2 node, specific QoS, message
@@ -107,10 +102,11 @@ public:
    */
   MonitorState(const rclcpp::Node::SharedPtr &node, std::string topic_name,
                std::set<std::string> outcomes, MonitorHandler monitor_handler,
-               rclcpp::QoS qos, int msg_queue, int timeout)
+               rclcpp::QoS qos = 10,
+               rclcpp::CallbackGroup::SharedPtr callback_group = nullptr,
+               int msg_queue = 10, int timeout = -1)
       : State({}), topic_name(topic_name), monitor_handler(monitor_handler),
-        msg_queue(msg_queue), timeout(timeout), monitoring(false),
-        time_to_wait(1000) {
+        qos(qos), msg_queue(msg_queue), timeout(timeout) {
 
     // set outcomes
     if (timeout > 0) {
@@ -118,6 +114,7 @@ public:
     } else {
       this->outcomes = {};
     }
+    this->outcomes.insert(basic_outcomes::CANCEL);
 
     if (outcomes.size() > 0) {
       for (std::string outcome : outcomes) {
@@ -131,9 +128,13 @@ public:
       this->node_ = node;
     }
 
-    // create subscriber
+    // Options for the subscription
+    this->options.callback_group = callback_group;
+
+    // Crate subscription
     this->sub = this->node_->template create_subscription<MsgT>(
-        topic_name, qos, std::bind(&MonitorState::callback, this, _1));
+        this->topic_name, this->qos,
+        std::bind(&MonitorState::callback, this, _1), this->options);
   }
 
   /**
@@ -146,73 +147,81 @@ public:
   std::string
   execute(std::shared_ptr<yasmin::blackboard::Blackboard> blackboard) override {
 
-    float elapsed_time = 0;
-    this->msg_list.clear();
-    this->monitoring = true;
-
     while (this->msg_list.empty()) {
-      std::this_thread::sleep_for(
-          std::chrono::microseconds(this->time_to_wait));
+      std::unique_lock<std::mutex> lock(this->msg_mutex);
+      auto status =
+          this->msg_cond.wait_for(lock, std::chrono::seconds(this->timeout));
 
-      if (this->timeout > 0) {
+      if (this->is_canceled()) {
+        return basic_outcomes::CANCEL;
+      }
 
-        if (elapsed_time / 1e6 >= this->timeout) {
-          this->monitoring = false;
-          RCLCPP_WARN(this->node_->get_logger(),
-                      "Timeout reached, topic '%s' is not available",
-                      this->topic_name.c_str());
-          return basic_outcomes::TIMEOUT;
-        }
-
-        elapsed_time += this->time_to_wait;
+      if (this->timeout > 0 && status == std::cv_status::timeout) {
+        YASMIN_LOG_WARN("Timeout reached, topic '%s' is not available",
+                        this->topic_name.c_str());
+        return basic_outcomes::TIMEOUT;
       }
     }
 
-    RCLCPP_INFO(this->node_->get_logger(), "Processing msg from topic '%s'",
-                this->topic_name.c_str());
+    YASMIN_LOG_INFO("Processing msg from topic '%s'", this->topic_name.c_str());
     std::string outcome =
         this->monitor_handler(blackboard, this->msg_list.at(0));
     this->msg_list.erase(this->msg_list.begin());
 
-    this->monitoring = false;
     return outcome;
+  }
+
+  /**
+   * @brief Cancel the current monitor state.
+   *
+   * This function cancels the ongoing monitor.
+   */
+  void cancel_state() {
+    yasmin::State::cancel_state();
+    this->msg_cond.notify_one();
   }
 
 private:
   rclcpp::Node::SharedPtr node_; /**< ROS 2 node pointer. */
   std::shared_ptr<rclcpp::Subscription<MsgT>>
       sub; /**< Subscription to the ROS 2 topic. */
-  std::vector<std::shared_ptr<MsgT>>
-      msg_list; /**< List to store queued messages. */
 
   std::string topic_name; /**< Name of the topic to monitor. */
+  rclcpp::QoS qos;        /**< Quality of Service settings for the topic. */
+  rclcpp::SubscriptionOptions options; /**< Options for the subscription. */
+
+  std::vector<std::shared_ptr<MsgT>>
+      msg_list; /**< List to store queued messages. */
   MonitorHandler
       monitor_handler; /**< Callback function to handle incoming messages. */
   int msg_queue;       /**< Maximum number of messages to queue. */
   int timeout;         /**< Timeout in seconds for message reception. */
-  bool monitoring;     /**< Flag to control message monitoring state. */
-  int time_to_wait;    /**< Time in microseconds to wait between checks. */
+
+  /// Condition variable for action completion.
+  std::condition_variable msg_cond;
+  /// Mutex for protecting action completion.
+  std::mutex msg_mutex;
 
   /**
    * @brief Callback function for receiving messages from the subscribed topic.
    *
-   * Adds the message to `msg_list` if monitoring is active, maintaining a
-   * maximum queue size of `msg_queue`.
+   * Adds the message to `msg_list` maintaining a maximum queue size of
+   * `msg_queue`.
    *
    * @param msg The message received from the topic.
    */
   void callback(const typename MsgT::SharedPtr msg) {
 
-    if (this->monitoring) {
-      this->msg_list.push_back(msg);
+    this->msg_list.push_back(msg);
 
-      if ((int)this->msg_list.size() >= this->msg_queue) {
-        this->msg_list.erase(this->msg_list.begin());
-      }
+    if ((int)this->msg_list.size() > this->msg_queue) {
+      this->msg_list.erase(this->msg_list.begin());
     }
+
+    this->msg_cond.notify_one();
   }
 };
 
 } // namespace yasmin_ros
 
-#endif
+#endif // YASMIN_ROS__MONITOR_STATE_HPP

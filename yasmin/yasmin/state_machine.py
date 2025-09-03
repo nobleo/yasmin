@@ -1,4 +1,4 @@
-# Copyright (C) 2023  Miguel Ángel González Santamarta
+# Copyright (C) 2023 Miguel Ángel González Santamarta
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,7 +15,7 @@
 
 from typing import Set, List, Tuple, Dict, Any
 from typing import Union, Callable
-from threading import Lock
+from threading import Lock, Event
 
 import yasmin
 from yasmin import State
@@ -32,6 +32,7 @@ class StateMachine(State):
         _start_state (str): The name of the initial state of the state machine.
         __current_state (str): The name of the current state being executed.
         __current_state_lock (Lock): A threading lock to manage access to the current state.
+        __current_state_event (Event): An event to signal when the current state changes.
         _validated (bool): A flag indicating whether the state machine has been validated.
         __start_cbs (List[Tuple[Callable[[Blackboard, str, List[Any]], None], List[Any]]]): A list of callbacks to call when the state machine starts.
         __transition_cbs (List[Tuple[Callable[[Blackboard, str, List[Any]], None], List[Any]]]): A list of callbacks to call during state transitions.
@@ -55,6 +56,8 @@ class StateMachine(State):
         self.__current_state: str = None
         ## A threading lock to manage access to the current state.
         self.__current_state_lock: Lock = Lock()
+        ## An event to signal when the current state changes.
+        self.__current_state_event: Event = Event()
 
         ## A flag indicating whether the state machine has been validated.
         self._validated: bool = False
@@ -72,11 +75,15 @@ class StateMachine(State):
             Tuple[Callable[[Blackboard, str, List[Any]], None], List[Any]]
         ] = []
 
+        ## A dictionary of remappings to set in the blackboard in each transition
+        self.__remappings: Dict[str, Dict[str, str]] = {}
+
     def add_state(
         self,
         name: str,
         state: State,
         transitions: Dict[str, str] = None,
+        remappings: Dict[str, Dict[str, str]] = None,
     ) -> None:
         """
         Adds a new state to the state machine.
@@ -87,7 +94,7 @@ class StateMachine(State):
             transitions (Dict[str, str], optional): A dictionary mapping source outcomes to target states. Defaults to None.
 
         Raises:
-            KeyError: If the state name is already registered.
+            KeyError: If the state name is already registered or is an outcome.
             ValueError: If transitions contain empty keys or values.
             KeyError: If transitions reference unregistered outcomes.
         """
@@ -101,6 +108,10 @@ class StateMachine(State):
         # Check if state name is already in the state machine
         if name in self._states:
             raise KeyError(f"State '{name}' already registered in the state machine")
+
+        # Check if state name is an outcome of the state machine
+        if name in self._outcomes:
+            raise KeyError(f"State name '{name}' is already registered as an outcome")
 
         # Check the transitions
         for key in transitions:
@@ -120,6 +131,9 @@ class StateMachine(State):
         )
 
         self._states[name] = {"state": state, "transitions": transitions}
+
+        if remappings != None:
+            self.__remappings[name] = remappings
 
         if not self._start_state:
             self.set_start_state(name)
@@ -181,6 +195,17 @@ class StateMachine(State):
                 return self.__current_state
 
         return ""
+
+    def __set_current_state(self, state_name: str) -> None:
+        """
+        Sets the current state name.
+
+        Parameters:
+            state_name (str): The name of the state to set as the current state.
+        """
+        with self.__current_state_lock:
+            self.__current_state = state_name
+            self.__current_state_event.set()
 
     def add_start_cb(self, cb: Callable, args: List[Any] = None) -> None:
         """
@@ -291,7 +316,7 @@ class StateMachine(State):
         yasmin.YASMIN_LOG_DEBUG(f"Validating state machine '{self}'")
 
         if self._validated and not strict_mode:
-            yasmin.YASMIN_LOG_DEBUG("State machine '{self}' has already been validated")
+            yasmin.YASMIN_LOG_DEBUG(f"State machine '{self}' has already been validated")
 
         # Terminal outcomes from all transitions
         terminal_outcomes = []
@@ -361,20 +386,21 @@ class StateMachine(State):
         """
         self.validate()
 
-        start_state = self._start_state
         yasmin.YASMIN_LOG_INFO(
-            f"Executing state machine with initial state '{start_state}'"
+            f"Executing state machine with initial state '{self._start_state}'"
         )
-        self._call_start_cbs(blackboard, start_state)
+        self._call_start_cbs(blackboard, self._start_state)
 
-        with self.__current_state_lock:
-            self.__current_state: str = start_state
+        self.__set_current_state(self._start_state)
 
         while not self.is_canceled():
             state = self._states[self.get_current_state()]
+            if self.get_current_state() in self.__remappings:
+                blackboard.remappings = self.__remappings[self.get_current_state()]
+            else:
+                blackboard.remappings = dict()
             outcome = state["state"](blackboard)
             old_outcome = outcome
-
             # Check if outcome belongs to state
             if outcome not in state["state"].get_outcomes():
                 raise KeyError(
@@ -387,8 +413,7 @@ class StateMachine(State):
 
             # Outcome is an outcome of the state machine
             if outcome in self.get_outcomes():
-                with self.__current_state_lock:
-                    self.__current_state: str = None
+                self.__set_current_state("")
 
                 yasmin.YASMIN_LOG_INFO(f"State machine ends with outcome '{outcome}'")
                 self._call_end_cbs(blackboard, outcome)
@@ -407,8 +432,7 @@ class StateMachine(State):
                     old_outcome,
                 )
 
-                with self.__current_state_lock:
-                    self.__current_state: str = outcome
+                self.__set_current_state(outcome)
 
             # Outcome is not in the state machine
             else:
@@ -425,9 +449,17 @@ class StateMachine(State):
         Overrides the cancel_state method from the parent State class.
         """
         super().cancel_state()
-        with self.__current_state_lock:
-            if self.__current_state:
-                self._states[self.__current_state]["state"].cancel_state()
+
+        if self.is_running():
+            current_state = self.get_current_state()
+
+            while not current_state:
+                self.__current_state_event.clear()
+                self.__current_state_event.wait()
+                current_state = self.get_current_state()
+
+            if current_state:
+                self._states[current_state]["state"].cancel_state()
 
     def __str__(self) -> str:
         """

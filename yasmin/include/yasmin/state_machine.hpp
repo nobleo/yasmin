@@ -1,4 +1,4 @@
-// Copyright (C) 2023  Miguel Ángel González Santamarta
+// Copyright (C) 2023 Miguel Ángel González Santamarta
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,10 +13,11 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef YASMIN_STATE_MACHINE_HPP
-#define YASMIN_STATE_MACHINE_HPP
+#ifndef YASMIN__STATE_MACHINE_HPP
+#define YASMIN__STATE_MACHINE_HPP
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <map>
 #include <memory>
@@ -71,21 +72,15 @@ public:
    * state.
    * @param transitions A map of transitions where the key is the outcome
    *                    and the value is the target state name.
-   * @throws std::logic_error If the state is already registered.
+   * @param remapping A map of remapping keys for the blackboard.
+   * @throws std::logic_error If the state is already registered or is an
+   * outcome.
    * @throws std::invalid_argument If any transition has empty source or target,
    *                               or references unregistered outcomes.
    */
   void add_state(std::string name, std::shared_ptr<State> state,
-                 std::map<std::string, std::string> transitions);
-
-  /**
-   * @brief Adds a state to the state machine without transitions.
-   *
-   * @param name The name of the state.
-   * @param state A shared pointer to the State object representing the new
-   * state.
-   */
-  void add_state(std::string name, std::shared_ptr<State> state);
+                 std::map<std::string, std::string> transitions = {},
+                 std::map<std::string, std::string> remapping = {});
 
   /**
    * @brief Sets the start state for the state machine.
@@ -234,12 +229,16 @@ private:
   std::map<std::string, std::shared_ptr<State>> states;
   /// Map of transitions
   std::map<std::string, std::map<std::string, std::string>> transitions;
+  /// A dictionary of remappings to set in the blackboard in each transition
+  std::map<std::string, std::map<std::string, std::string>> remappings;
   /// Name of the start state
   std::string start_state;
   /// Name of the current state
   std::string current_state;
   /// Mutex for current state access
   std::unique_ptr<std::mutex> current_state_mutex;
+  /// Condition variable for current state changes
+  std::condition_variable current_state_cond;
 
   /// Flag to indicate if the state machine has been validated
   std::atomic_bool validated{false};
@@ -251,8 +250,15 @@ private:
       transition_cbs;
   /// End callbacks executed before the state machine
   std::vector<std::pair<EndCallbackType, std::vector<std::string>>> end_cbs;
+
+  /**
+   * @brief Sets the current state name.
+   *
+   * @param state_name The name of the state to set as the current state.
+   */
+  void set_current_state(std::string state_name);
 };
 
 } // namespace yasmin
 
-#endif
+#endif // YASMIN__STATE_MACHINE_HPP

@@ -1,4 +1,4 @@
-# Copyright (C) 2023  Miguel Ángel González Santamarta
+# Copyright (C) 2023 Miguel Ángel González Santamarta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -105,6 +105,20 @@ class TestStateMachine(unittest.TestCase):
         self.assertEqual(
             str(context.exception),
             "\"State 'FOO' already registered in the state machine\"",
+        )
+
+    def test_add_outcome_state(self):
+        with self.assertRaises(KeyError) as context:
+            self.sm.add_state(
+                "outcome4",
+                FooState(),
+                transitions={
+                    "outcome1": "BAR",
+                },
+            )
+        self.assertEqual(
+            str(context.exception),
+            "\"State name 'outcome4' is already registered as an outcome\"",
         )
 
     def test_add_state_with_wrong_outcome(self):

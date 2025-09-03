@@ -1,4 +1,4 @@
-// Copyright (C) 2023  Miguel Ángel González Santamarta
+// Copyright (C) 2023 Miguel Ángel González Santamarta
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -31,16 +31,22 @@
 
 using namespace yasmin;
 
-StateMachine::StateMachine(std::set<std::string> outcomes) : State(outcomes) {
-  this->current_state_mutex = std::make_unique<std::mutex>();
-}
+StateMachine::StateMachine(std::set<std::string> outcomes)
+    : State(outcomes), current_state_mutex(std::make_unique<std::mutex>()) {}
 
 void StateMachine::add_state(std::string name, std::shared_ptr<State> state,
-                             std::map<std::string, std::string> transitions) {
+                             std::map<std::string, std::string> transitions,
+                             std::map<std::string, std::string> remapping) {
 
   if (this->states.find(name) != this->states.end()) {
     throw std::logic_error("State '" + name +
                            "' already registered in the state machine");
+  }
+
+  if (std::find(this->outcomes.begin(), this->outcomes.end(), name) !=
+      this->outcomes.end()) {
+    throw std::logic_error("State name '" + name +
+                           "' is already registered as an outcome");
   }
 
   for (auto it = transitions.begin(); it != transitions.end(); ++it) {
@@ -81,6 +87,7 @@ void StateMachine::add_state(std::string name, std::shared_ptr<State> state,
 
   this->states.insert({name, state});
   this->transitions.insert({name, transitions});
+  this->remappings.insert({name, remapping});
 
   if (this->start_state.empty()) {
     this->set_start_state(name);
@@ -88,10 +95,6 @@ void StateMachine::add_state(std::string name, std::shared_ptr<State> state,
 
   // Mark state machine as no validated
   this->validated.store(false);
-}
-
-void StateMachine::add_state(std::string name, std::shared_ptr<State> state) {
-  this->add_state(name, state, {});
 }
 
 void StateMachine::set_start_state(std::string state_name) {
@@ -127,6 +130,12 @@ StateMachine::get_transitions() {
 std::string StateMachine::get_current_state() {
   const std::lock_guard<std::mutex> lock(*this->current_state_mutex.get());
   return this->current_state;
+}
+
+void StateMachine::set_current_state(std::string state_name) {
+  const std::lock_guard<std::mutex> lock(*this->current_state_mutex.get());
+  this->current_state = state_name;
+  this->current_state_cond.notify_all();
 }
 
 void StateMachine::add_start_cb(StartCallbackType cb,
@@ -290,13 +299,12 @@ StateMachine::execute(std::shared_ptr<blackboard::Blackboard> blackboard) {
 
   YASMIN_LOG_INFO("Executing state machine with initial state '%s'",
                   this->start_state.c_str());
-  this->call_start_cbs(blackboard, this->get_start_state());
+  this->call_start_cbs(blackboard, this->start_state);
 
-  this->current_state_mutex->lock();
-  this->current_state = this->start_state;
-  this->current_state_mutex->unlock();
+  this->set_current_state(this->start_state);
 
   std::map<std::string, std::string> transitions;
+  std::map<std::string, std::string> remapping;
   std::string outcome;
   std::string old_outcome;
 
@@ -305,6 +313,8 @@ StateMachine::execute(std::shared_ptr<blackboard::Blackboard> blackboard) {
     std::string current_state = this->get_current_state();
     auto state = this->states.at(current_state);
     transitions = this->transitions.at(current_state);
+    remapping = this->remappings.at(current_state);
+    blackboard->set_remapping(remapping);
 
     outcome = (*state.get())(blackboard);
     old_outcome = std::string(outcome);
@@ -326,10 +336,7 @@ StateMachine::execute(std::shared_ptr<blackboard::Blackboard> blackboard) {
     if (std::find(this->outcomes.begin(), this->outcomes.end(), outcome) !=
         this->outcomes.end()) {
 
-      this->current_state_mutex->lock();
-      this->current_state.clear();
-      this->current_state_mutex->unlock();
-
+      this->set_current_state("");
       YASMIN_LOG_INFO("State machine ends with outcome '%s'", outcome.c_str());
       this->call_end_cbs(blackboard, outcome);
 
@@ -341,12 +348,10 @@ StateMachine::execute(std::shared_ptr<blackboard::Blackboard> blackboard) {
       YASMIN_LOG_INFO("State machine transitioning '%s' : '%s' --> '%s'",
                       this->current_state.c_str(), old_outcome.c_str(),
                       outcome.c_str());
-      this->call_transition_cbs(blackboard, this->get_start_state(), outcome,
+      this->call_transition_cbs(blackboard, this->current_state, outcome,
                                 old_outcome);
 
-      this->current_state_mutex->lock();
-      this->current_state = outcome;
-      this->current_state_mutex->unlock();
+      this->set_current_state(outcome);
 
       // Outcome is not in the sm
     } else {
@@ -377,9 +382,19 @@ std::string StateMachine::operator()() {
 void StateMachine::cancel_state() {
   State::cancel_state();
 
-  const std::lock_guard<std::mutex> lock(*this->current_state_mutex.get());
-  if (!this->current_state.empty()) {
-    this->states.at(this->current_state)->cancel_state();
+  if (this->is_running()) {
+
+    auto current_state = this->get_current_state();
+
+    while (current_state.empty()) {
+      std::unique_lock<std::mutex> lock(*this->current_state_mutex.get());
+      this->current_state_cond.wait(lock);
+      current_state = this->get_current_state();
+    }
+
+    if (!current_state.empty()) {
+      this->states.at(current_state)->cancel_state();
+    }
   }
 }
 

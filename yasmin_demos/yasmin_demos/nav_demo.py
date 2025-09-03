@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (C) 2024  Miguel Ángel González Santamarta
+# Copyright (C) 2024 Miguel Ángel González Santamarta
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@ from yasmin import CbState
 from yasmin import Blackboard
 from yasmin import StateMachine
 from yasmin_ros import ActionState
-from yasmin_ros.ros_logs import set_ros_loggers
+from yasmin_ros import set_ros_loggers
 from yasmin_ros.basic_outcomes import SUCCEED, ABORT, CANCEL
 from yasmin_viewer import YasminViewerPub
 
@@ -211,7 +211,7 @@ def main() -> None:
     )
 
     # Publish FSM information for visualization
-    YasminViewerPub("YASMIN_NAV_DEMO", sm)
+    YasminViewerPub("YASMIN_NAV2_DEMO", sm)
 
     # Execute the state machine
     blackboard = Blackboard()

@@ -1,4 +1,4 @@
-// Copyright (C) 2023  Miguel Ángel González Santamarta
+// Copyright (C) 2023 Miguel Ángel González Santamarta
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -146,7 +146,7 @@ int main(int argc, char *argv[]) {
                 });
 
   // Publish state machine updates
-  yasmin_viewer::YasminViewerPub yasmin_pub("yasmin_demo", sm);
+  yasmin_viewer::YasminViewerPub yasmin_pub("YASMIN_DEMO", sm);
 
   // Execute the state machine
   try {
